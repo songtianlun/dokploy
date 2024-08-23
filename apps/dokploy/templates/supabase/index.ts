@@ -1,20 +1,50 @@
 import {
 	type Schema,
 	type Template,
-	generateBase64,
 	generateHash,
 	generatePassword,
 	generateRandomDomain,
 } from "../utils";
+import { SignJWT } from 'jose';
+import { createSecretKey } from 'crypto';
+
+const generateSupabaseAnonJWT = async (secret: string): Promise<string> => {
+  const key = createSecretKey(Buffer.from(secret, 'utf-8'));
+  const now = new Date();
+  now.setSeconds(0, 0); // 设置秒和毫秒为0
+
+  return await new SignJWT({ role: 'anon' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt(now)
+    .setIssuer('supabase')
+    .setExpirationTime(new Date(now.getTime() + 100 * 365 * 24 * 60 * 60 * 1000)) // 100年后过期
+    .sign(key);
+};
+
+const generateSupabaseServiceJWT = async (secret: string): Promise<string> => {
+  const key = createSecretKey(Buffer.from(secret, 'utf-8'));
+  const now = new Date();
+  now.setSeconds(0, 0); // 设置秒和毫秒为0
+
+  return await new SignJWT({ role: 'service_role' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt(now)
+    .setIssuer('supabase')
+    .setExpirationTime(new Date(now.getTime() + 100 * 365 * 24 * 60 * 60 * 1000)) // 100年后过期
+    .sign(key);
+};
 
 export function generate(schema: Schema): Template {
 	const mainServiceHash = generateHash(schema.projectName);
 	const randomDomain = generateRandomDomain(schema);
 
 	const postgresPassword = generatePassword(32);
-	const jwtSecret = generateBase64(32);
+	const jwtSecret = generatePassword(32);
 	const dashboardPassword = generatePassword(32);
 	const logflareApiKey = generatePassword(32);
+
+  const annonKey = generateSupabaseAnonJWT(jwtSecret);
+  const serviceRoleKey = generateSupabaseServiceJWT(jwtSecret);
 
 	const envs = [
 		`SUPABASE_HOST=${randomDomain}`,
