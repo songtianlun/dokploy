@@ -1,3 +1,4 @@
+import { createHmac, randomBytes } from "node:crypto";
 import {
 	type Schema,
 	type Template,
@@ -5,34 +6,58 @@ import {
 	generatePassword,
 	generateRandomDomain,
 } from "../utils";
-import { SignJWT } from 'jose';
-import { createSecretKey } from 'crypto';
 
-const generateSupabaseAnonJWT = async (secret: string): Promise<string> => {
-  const key = createSecretKey(Buffer.from(secret, 'utf-8'));
-  const now = new Date();
-  now.setSeconds(0, 0); // 设置秒和毫秒为0
+interface JWTPayload {
+	role: "anon" | "service_role";
+	iss: string;
+	iat: number;
+	exp: number;
+}
 
-  return await new SignJWT({ role: 'anon' })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt(now)
-    .setIssuer('supabase')
-    .setExpirationTime(new Date(now.getTime() + 100 * 365 * 24 * 60 * 60 * 1000)) // 100年后过期
-    .sign(key);
-};
+function base64UrlEncode(str: string): string {
+	return Buffer.from(str)
+		.toString("base64")
+		.replace(/\+/g, "-")
+		.replace(/\//g, "_")
+		.replace(/=/g, "");
+}
 
-const generateSupabaseServiceJWT = async (secret: string): Promise<string> => {
-  const key = createSecretKey(Buffer.from(secret, 'utf-8'));
-  const now = new Date();
-  now.setSeconds(0, 0); // 设置秒和毫秒为0
+function generateJWT(payload: JWTPayload, secret: string): string {
+	const header = { alg: "HS256", typ: "JWT" };
 
-  return await new SignJWT({ role: 'service_role' })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt(now)
-    .setIssuer('supabase')
-    .setExpirationTime(new Date(now.getTime() + 100 * 365 * 24 * 60 * 60 * 1000)) // 100年后过期
-    .sign(key);
-};
+	const encodedHeader = base64UrlEncode(JSON.stringify(header));
+	const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+
+	const signature = createHmac("sha256", secret)
+		.update(`${encodedHeader}.${encodedPayload}`)
+		.digest("base64url");
+
+	return `${encodedHeader}.${encodedPayload}.${signature}`;
+}
+
+export function generateSupabaseAnonJWT(secret: string): string {
+	const now = Math.floor(Date.now() / 1000);
+	const payload: JWTPayload = {
+		role: "anon",
+		iss: "supabase",
+		iat: now,
+		exp: now + 100 * 365 * 24 * 60 * 60, // 100 years
+	};
+
+	return generateJWT(payload, secret);
+}
+
+export function generateSupabaseServiceJWT(secret: string): string {
+	const now = Math.floor(Date.now() / 1000);
+	const payload: JWTPayload = {
+		role: "service_role",
+		iss: "supabase",
+		iat: now,
+		exp: now + 100 * 365 * 24 * 60 * 60, // 100 years
+	};
+
+	return generateJWT(payload, secret);
+}
 
 export function generate(schema: Schema): Template {
 	const mainServiceHash = generateHash(schema.projectName);
@@ -43,8 +68,8 @@ export function generate(schema: Schema): Template {
 	const dashboardPassword = generatePassword(32);
 	const logflareApiKey = generatePassword(32);
 
-  const annonKey = generateSupabaseAnonJWT(jwtSecret);
-  const serviceRoleKey = generateSupabaseServiceJWT(jwtSecret);
+	const annonKey = generateSupabaseAnonJWT(jwtSecret);
+	const serviceRoleKey = generateSupabaseServiceJWT(jwtSecret);
 
 	const envs = [
 		`SUPABASE_HOST=${randomDomain}`,
